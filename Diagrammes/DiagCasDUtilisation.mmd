@@ -1,0 +1,29 @@
+flowchart LR
+    Visiteur[Visiteur]
+    UtilisateurConnecte[Utilisateur connecté]
+
+    Rechercher(["Rechercher des séries"])
+    Recommander(["Recommander des séries"])
+    Gerer(["Gérer son compte"])
+    Identifier(["S'identifier"])
+
+    Visiteur --> Rechercher
+    Visiteur --> Recommander
+    UtilisateurConnecte --> Rechercher
+    UtilisateurConnecte --> Recommander
+    UtilisateurConnecte --> Gerer
+    Gerer -->|"includes"| Identifier
+
+    Visiteur@{ shape: rounded}
+    Visiteur:::iritStyle
+    UtilisateurConnecte@{ shape: rounded}
+    UtilisateurConnecte:::iritStyle
+    Gerer@{ shape: rounded}
+    Gerer:::iritStyle
+    Identifier@{ shape: rounded}
+    Identifier:::iritStyle
+    Rechercher@{ shape: rounded}
+    Rechercher:::iritStyle
+    Recommander@{ shape: rounded}
+    Recommander:::iritStyle
+    classDef iritStyle fill:#e2e8f0, stroke:#818cf8

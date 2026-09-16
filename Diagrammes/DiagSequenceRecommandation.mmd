@@ -1,0 +1,21 @@
+sequenceDiagram
+    actor U as Utilisateur
+    participant W as Interface Web
+    participant A as API REST
+    participant R as Moteur de recommandation
+    participant D as Base de donnees
+
+    U->>W: Demande de recommandations
+    W->>A: GET /api/series/recommandations
+    alt Utilisateur connecte
+        A->>D: Recuperation des evaluations de l'utilisateur
+        D-->>A: Liste des evaluations
+        A->>R: Recommandation personnalisee(evaluations)
+    else Utilisateur non connecte
+        A->>R: Recommandation par defaut()
+    end
+    R->>D: Recuperation des scores/similarites
+    D-->>R: Donnees
+    R-->>A: Liste de series recommandees
+    A-->>W: Reponse JSON (recommandations)
+    W-->>U: Affichage des recommandations

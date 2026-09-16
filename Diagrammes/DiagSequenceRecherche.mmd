@@ -1,0 +1,15 @@
+sequenceDiagram
+    actor U as Utilisateur
+    participant W as Interface Web
+    participant A as API REST
+    participant M as Moteur de recherche
+    participant D as Base de donnees
+
+    U->>W: Saisie des mots-cles
+    W->>A: GET /api/series/recherche?q=...
+    A->>M: Recherche(mots-cles)
+    M->>D: Recuperation de l'index
+    D-->>M: Index des series
+    M-->>A: Liste des series triees par pertinence
+    A-->>W: Reponse JSON (resultats)
+    W-->>U: Affichage des resultats

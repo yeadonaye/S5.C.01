@@ -1,0 +1,18 @@
+sequenceDiagram
+    actor U as Utilisateur
+    participant W as Interface Web
+    participant A as API REST
+    participant D as Base de donnees
+
+    U->>W: Selection d'une serie + note (1 a 5)
+    W->>A: POST /api/utilisateurs/{id}/evaluations
+    A->>A: Verification de l'authentification (token)
+    alt Token invalide
+        A-->>W: Erreur 401 Non autorise
+        W-->>U: Message "Veuillez vous connecter"
+    else Token valide
+        A->>D: Enregistrement de l'evaluation
+        D-->>A: Confirmation
+        A-->>W: Reponse 200 OK
+        W-->>U: Confirmation de l'evaluation
+    end

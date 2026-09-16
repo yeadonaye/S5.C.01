@@ -8,7 +8,7 @@
 
 **Description générale** : Poser les fondations organisationnelles avant de coder quoi que ce soit — outils, binôme, dépôt, planning.
 
-- Créer le tableau Trello du projet et inviter l'enseignant (julien.broisin@irit.fr)
+- Créer le tableau Trello du projet et inviter l'enseignant (<julien.broisin@irit.fr>)
 - Créer le dépôt Git (GitLab/GitHub) et donner l'accès à l'enseignant
 - Définir la répartition des rôles dans le binôme (même si tout le monde touche à tout)
 - Lister les livrables attendus et leurs échéances dans Trello (créer une carte par livrable)
@@ -156,4 +156,5 @@
 ---
 
 ### Suggestion d'usage
+
 Chaque section ci-dessus peut devenir une **liste Trello**, et chaque sous-tâche une **carte**. Les tâches 1 à 3 sont bloquantes pour tout le reste (pas de recherche/recommandation sans données propres et indexées) — à démarrer en priorité.
