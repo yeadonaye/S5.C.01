@@ -9,7 +9,7 @@ import re
 # ============================================================
 
 ARCHIVE_PATH = Path("sous-titres.7z")
-
+# nathan a raison et yado a tort
 # Subtitle formats we're interested in
 SUBTITLE_EXTENSIONS =  ".srt"
    
