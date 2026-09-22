@@ -11,14 +11,8 @@ import re
 ARCHIVE_PATH = Path("sous-titres.7z")
 
 # Subtitle formats we're interested in
-SUBTITLE_EXTENSIONS = {
-    ".srt",
-    ".vtt",
-    ".ass",
-    ".ssa",
-    ".sub",
-    ".sbv"
-}
+SUBTITLE_EXTENSIONS =  ".srt"
+   
 
 
 # ============================================================
@@ -42,21 +36,20 @@ episodes_by_series = defaultdict(set)
 
 def detect_language(filename):
     """
-    Try to identify VO / VF from the filename.
+    Detect VF / VO immediately before the file extension.
 
     Examples:
-        S01E01.VO.srt -> VO
-        S01E01.VF.srt -> VF
-        episode_vo.srt -> VO
+        breakingbads02e01VF.srt -> VF
+        breakingbads02e01VO.srt -> VO
     """
 
-    name = filename.lower()
+    name = Path(filename).stem.lower()
 
-    if re.search(r'(^|[._\-\s])vo([._\-\s]|$)', name):
-        return "VO"
-
-    if re.search(r'(^|[._\-\s])vf([._\-\s]|$)', name):
+    if name.endswith("vf"):
         return "VF"
+
+    if name.endswith("vo"):
+        return "VO"
 
     return "UNKNOWN"
 
