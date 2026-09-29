@@ -1,1 +1,6 @@
-nottoyageFichiers/resultat/
+nettoyageFichiers/resultat/
+Diagrammes/src/DiagrammeDeCasUtilisation/
+
+.vscode
+*.lo1
+LoopingImage.jpg
