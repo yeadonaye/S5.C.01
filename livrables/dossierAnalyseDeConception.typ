@@ -1,7 +1,7 @@
 #let code       = "S5.C.01"
 #let titre      = "Proposer une solution optimisée à partir des données"
 #let sous-titre = "Dossier d'analyse et de conception"
-#let auteurs    = ("HISABU Nathan Teskeste", "SENTAYEHU Yeadonaye Ashenafi")
+#let auteurs    = ("HISABU Nathan Tekeste", "SENTAYEHU Yeadonaye Ashenafi")
 #let encadrant  = "M. Julien BROISIN"
 #let formation  = "BUT Informatique"
 #let annee      = "2026 – 2027"
