@@ -2,20 +2,41 @@ sequenceDiagram
     actor U as Utilisateur
     participant W as Interface Web
     participant A as API REST
-    participant R as Moteur de recommandation
-    participant D as Base de donnees
+    participant M as Moteur de recommandation
+    participant B as Base de données
 
-    U->>W: Demande de recommandations
-    W->>A: GET /api/series/recommandations
-    alt Utilisateur connecte
-        A->>D: Recuperation des evaluations de l'utilisateur
-        D-->>A: Liste des evaluations
-        A->>R: Recommandation personnalisee(evaluations)
-    else Utilisateur non connecte
-        A->>R: Recommandation par defaut()
+    U->>W: Demander les recommandations
+    activate W
+    W->>+A: GET  (Authorization: token)
+    A->>A: Vérifier le token
+
+    alt Utilisateur connecté (token valide)
+        A->>+M: recommanderPersonnalisé(userId)
+        M->>+B: getÉvaluations(userId)
+        B-->>-M: évaluations
+
+        alt Liste d'évaluations vide
+            M->>M: recommanderParDéfaut()
+            M->>+B: getSériesPopulaires()
+            B-->>-M: séries populaires
+        else Liste d'évaluations non vide
+            M->>+B: getSimilarités(évaluations)
+            B-->>-M: scores de similarité
+        end
+
+    else Utilisateur non connecté
+        A->>M: recommandationParDéfaut()
+        M->>+B: getSériesPopulaires()
+        B-->>-M: séries populaires
     end
-    R->>D: Recuperation des scores/similarites
-    D-->>R: Donnees
-    R-->>A: Liste de series recommandees
-    A-->>W: Reponse JSON (recommandations)
-    W-->>U: Affichage des recommandations
+
+    M-->>-A: liste de séries recommandées
+
+    alt Succès
+        A-->>W: 200 OK + JSON (recommandations)
+    else Erreur serveur
+        A-->>-W: 500 Erreur
+    end
+
+    W-->>U: Afficher les recommandations (ou message d'erreur)
+    deactivate W

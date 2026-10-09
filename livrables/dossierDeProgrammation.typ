@@ -22,6 +22,7 @@
 #set text(
   font: "Libertinus Serif", size: 12pt, lang: "fr", region: "fr")
 #set heading(numbering: "1.")
+#show heading.where(level: 1): set text(fill: sombre)
 #set figure(supplement: "Fig.")
 #set page(
   paper: "a4",
@@ -114,7 +115,7 @@
     set text(size: 11pt, style: "italic", fill: gris)
     it
   }
-  outline(title: text(fill: accent)[Table des matières], indent: 2em, depth: 3)
+  outline(title: "Table des matières", indent: 2em, depth: 3)
 }
 #pagebreak()
 
