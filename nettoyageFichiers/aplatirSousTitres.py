@@ -11,6 +11,8 @@ Usage :
     python aplatir_sous_titres.py                       (cherche sous-titres.7z à côté du script)
     python aplatir_sous_titres.py chemin\\vers\\archive.7z
     python aplatir_sous_titres.py archive.7z -o D:\\resultat
+    For Nathan :
+    py "C:\Users\natha\Documents\BUT IUT de Toulouse\Semestre 5\SAE 5\S5.C.01\nettoyageFichiers\aplatirSousTitres.py" "C:\Users\natha\Documents\BUT IUT de Toulouse\Semestre 5\SAE 5\sous-titres.7z" -o ./resultat 
 
 L'archive d'origine n'est jamais modifiée.
 """
