@@ -147,12 +147,15 @@ Fonctions d'un utilisateur connecté : Gérer son compte et personnaliser ses re
 ]
 
 = Description des grandes fonctionnalités
-== Cas d'utilisation (schéma global acteurs/fonctions)
-#yado("Ajouter l'image du diagramme de cas d'utilisation")
+== Cas d'utilisation
+#figure(
+  image("../diagrammes/images/diagrammeCasUtilisation.png", width: 40em),
+  caption: "Diagramme de cas d'utilisation du système de recher et recommandation de séries"
+)
 
 == Fiches détaillées par fonction
 #v(1em)
-Cas d'utilisation (Rechercher des séries):
+Cas d'utilisation (#text(weight: "bold")[Rechercher des séries]):
 
 #pad(left: 1.5em)[
   #text(weight: "bold", fill: accent)[Rôle :] Ce cas d'utilisation est déclanché lorsqu'un utilisateur (connecté ou pas) souhaite réaliser une recherche de série à partir d'un ou plusieurs mots-clés.
@@ -172,7 +175,7 @@ Cas d'utilisation (Rechercher des séries):
   #text(weight: "bold", fill: accent)[Exception :] Aucun résultat pertinent trouvé.
 ]
 #v(2em)
-Cas d'utilisation (Recommander des séries):
+Cas d'utilisation (#text(weight: "bold")[Recommander des séries]):
 
 #pad(left: 1.5em)[
   #text(weight: "bold", fill: accent)[Rôle :] Ce cas d'utilisation est déclenché lorsqu'un utilisateur souhaite se voir proposer des séries susceptibles de l'intéresser, en fonction de ses évaluations passées s'il est connecté (Recommandation personnalisé), ou des séries les mieux notées dans le cas contraire (Recommandation des meilleures séries).
@@ -192,7 +195,7 @@ Cas d'utilisation (Recommander des séries):
   #text(weight: "bold", fill: accent)[Exception :] Aucune évaluation disponible pour personnaliser (repli sur les recommandation par défaut)/ Problème de connexion avec le serveur.
 ]
 #v(2em)
-Cas d'utilisation (Gérer son compte):
+Cas d'utilisation (#text(weight: "bold")[Gérer son compte]):
 
 #pad(left: 1.5em)[
   #text(weight: "bold", fill: accent)[Rôle :] Ce cas d'utilisation regroupe la création, la modificatio, et la suppression d'un compte utilisateur, ainsi que la connexion/déconnexion et l'évaluation d'une série (note de 1 à 5), ces deux dernières actions nécessitent d'être authentifié d'abord.
@@ -218,7 +221,7 @@ Cas d'utilisation (Gérer son compte):
 Digramme de séquence pour la fonctionnalité de recherche de série à partir d'un ou de plusieurs mots clés.
 #figure(
   image("../diagrammes/images/diagrammeDeSequenceRecherche.png", width: 40em),
-  caption: [Diagramme de séquence pour la recherche de série]
+  caption: [Diagramme de séquence de recherche de série]
 )
 
 #v(3em)
@@ -226,7 +229,7 @@ Digramme de séquence pour la fonctionnalité de recherche de série à partir d
 Digramme de séquance pour la fonctionnalité de recommendation de série (pour un utilisateur connecté ou non connecté).
 #figure(
   image("../diagrammes/images/diagrammeDeSequenceRecommandation.png", width: 40em),
-  caption: [Diagramme de séquence pour la recommendation de série]
+  caption: [Diagramme de séquence de recommendation de série]
 )
 
 #v(3em)
@@ -234,23 +237,15 @@ Digramme de séquance pour la fonctionnalité de recommendation de série (pour 
 Digramme de séquence pour la fonctionnalité de notation de série.
 #figure(
   image("../diagrammes/images/diagrammeDeSequenceNoteSeries.png", width: 40em),
-  caption: [Diagramme de séquence pour la notation de série]
+  caption: [Diagramme de séquence de notation de série]
 )
-
-
-#yado("Les diagrammes de classe et d'objet ne sont pas demandé sur Moodle, juste le fichier exemplaire qu'on nous a fourni les contient.")
-
-= Diagramme de classe
-#yado("Ajouter l'image du diagramme de classes")
-
-= Diagramme d'objets
-#yado("ATTENTION: Le diagramme d'objets n'est pas encore fait!!!")
 
 = Architecture générale
 #yado("A faire une fois que le projet est terminé")
 
 == Description des composants et de leurs intéractions
 == Arborescence de l'application
+#yado("A faire une fois l'application terminé")
 
 = Modèle de données
 == MCD
