@@ -224,19 +224,14 @@ def traiter_serie(serie):
 
 def main():
     # 1. Récupérer le chemin de l'archive
-    archive = Path(
-        sys.argv[1] if len(sys.argv) > 1 else "sous-titres.7z"
-    )
+    archive = Path(__file__).resolve().parents[2] / "sous-titres.7z"
 
     if not archive.is_file():
         print("Archive introuvable :", archive)
         return
 
     # 2. Créer le dossier de sortie
-    sortie = Path(
-        sys.argv[2] if len(sys.argv) > 2
-        else archive.stem + "_extrait"
-    )
+    sortie = Path(__file__).resolve().parent / "resultat"
 
     if sortie.exists() and any(sortie.iterdir()):
         print("Le dossier de sortie n'est pas vide :", sortie)
@@ -271,6 +266,18 @@ def main():
         traiter_serie(serie)
 
     print("\nTerminé ! Résultat :", racine)
+
+    # Bilan du nombre de séries
+    series_finales = [
+        dossier for dossier in racine.iterdir()
+        if dossier.is_dir()
+    ]
+
+    print("\n========== BILAN FINAL ==========")
+    print("Nombre de séries au début :", len(series))
+    print("Nombre de séries à la fin :", len(series_finales))
+    print("Nombre de séries manquantes :", len(series) - len(series_finales))
+    print("=================================")
 
 
 if __name__ == "__main__":
