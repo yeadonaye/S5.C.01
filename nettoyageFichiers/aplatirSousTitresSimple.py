@@ -1,3 +1,4 @@
+
 import sys
 import shutil
 import zipfile
@@ -106,9 +107,13 @@ def traiter_serie(serie):
     zips_en_erreur = set()
 
     while True:
+        # MODIFICATION : rechercher les ZIP récursivement,
+        # y compris dans les sous-dossiers.
         zips = [
-            z for z in serie.glob("*.zip")
-            if z.name not in zips_en_erreur
+            z for z in serie.rglob("*")
+            if z.is_file()
+            and z.suffix.lower() == ".zip"
+            and z not in zips_en_erreur
         ]
 
         if not zips:
@@ -129,6 +134,33 @@ def traiter_serie(serie):
                         ).name
 
                         if not nom_fichier:
+                            continue
+
+                        # MODIFICATION : conserver également les ZIP
+                        # imbriqués pour pouvoir les traiter au tour suivant.
+                        if Path(nom_fichier).suffix.lower() == ".zip":
+                            destination_zip = zip_path.parent / nom_fichier
+
+                            if destination_zip.exists():
+                                compteur_zip = 1
+                                while True:
+                                    nouveau_nom_zip = (
+                                        f"{Path(nom_fichier).stem}_"
+                                        f"{compteur_zip}.zip"
+                                    )
+                                    destination_zip = (
+                                        zip_path.parent / nouveau_nom_zip
+                                    )
+                                    if not destination_zip.exists():
+                                        break
+                                    compteur_zip += 1
+
+                            with archive.open(nom) as source:
+                                with open(destination_zip, "wb") as cible:
+                                    shutil.copyfileobj(source, cible)
+
+                            fichiers_crees.append(destination_zip)
+                            print("ZIP imbriqué trouvé :", destination_zip.name)
                             continue
 
                         # Ignorer les fichiers qui ne sont pas des sous-titres
@@ -216,7 +248,7 @@ def traiter_serie(serie):
                         pass
 
                 # Préserver le ZIP pour pouvoir l'inspecter
-                zips_en_erreur.add(zip_path.name)
+                zips_en_erreur.add(zip_path)
 
     # Nettoyer les fichiers restants et aplatir la série
     aplatir_dossier(serie)
