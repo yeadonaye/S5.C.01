@@ -1,262 +1,98 @@
-
+import argparse
 import html
 import re
+from collections import Counter
 from pathlib import Path
 
-
-# --------------------------------------------------
-# 1. CONFIGURATION
-# --------------------------------------------------
-
-DOSSIER_SCRIPT = Path(__file__).resolve().parent
-
-# Dossier contenant les sous-titres déjà nettoyés
-SOURCE = DOSSIER_SCRIPT / "resultat" / "sous-titres"
-
-# Dossier contenant les dialogues extraits
-DESTINATION = (
-    DOSSIER_SCRIPT
-    / "resultat"
-    / "dossierNettoyerSousTitres"
+TIMESTAMP = re.compile(
+    r"^\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}"
 )
-
-# Format SRT :
-# 00:00:31,053 --> 00:00:33,044
-HORODATAGE_SRT = re.compile(
-    r"^\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->\s*"
-    r"\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}"
-)
-
-# Format MicroDVD :
-# {243}{287}Dialogue
-MICRODVD = re.compile(
-    r"^\s*\{\d+\}\{\d+\}(.*)$"
-)
+MICRODVD = re.compile(r"^\s*\{(\d+)\}\{(\d+)\}(.*)$")
+BALISES = re.compile(r"<[^>]*>|\{[^}]*\}")  # <i>, <b>, {\an8}, {y:i}...
 
 
-# --------------------------------------------------
-# 2. LECTURE DES FICHIERS
-# --------------------------------------------------
-
-def lire_fichier(chemin):
-    """Lit un fichier en essayant plusieurs encodages."""
-
+def lire(chemin):
+    """Décode en UTF-16 (si BOM), puis UTF-8, sinon cp1252."""
     donnees = chemin.read_bytes()
+    if donnees.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return donnees.decode("utf-16")
+    try:
+        return donnees.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return donnees.decode("cp1252", errors="replace")
 
-    for encodage in ("utf-8-sig", "cp1252", "latin-1"):
-        try:
-            return donnees.decode(encodage)
-        except UnicodeDecodeError:
-            continue
-
-    raise ValueError("Impossible de décoder le fichier")
-
-
-# --------------------------------------------------
-# 3. NETTOYAGE DES LIGNES
-# --------------------------------------------------
 
 def nettoyer_ligne(ligne):
-    """Nettoie une ligne sans supprimer son dialogue."""
+    ligne = BALISES.sub("", html.unescape(ligne))
+    return " ".join(ligne.split())  # normalise aussi les espaces insécables
 
-    ligne = html.unescape(ligne)
-
-    # Supprimer les balises HTML, par exemple <i> et <b>
-    ligne = re.sub(r"<[^>]*>", "", ligne)
-
-    # Normaliser les espaces et les tabulations
-    ligne = re.sub(r"[ \t]+", " ", ligne)
-
-    return ligne.strip()
-
-
-# --------------------------------------------------
-# 4. NETTOYAGE SRT
-# --------------------------------------------------
 
 def nettoyer_srt(texte):
-    """Extrait le dialogue d'un fichier SRT."""
-
     lignes = texte.splitlines()
-    resultat = []
-    horodatages_trouves = 0
-
+    sortie, trouves = [], 0
     for i, ligne in enumerate(lignes):
+        if TIMESTAMP.match(ligne):
+            trouves += 1
+        elif ligne.strip().isdigit() and i + 1 < len(lignes) and TIMESTAMP.match(lignes[i + 1]):
+            continue  # numéro de sous-titre
+        elif ligne := nettoyer_ligne(ligne):
+            sortie.append(ligne)
+        elif sortie and sortie[-1]:
+            sortie.append("")  # séparation entre sous-titres
+    return "\n".join(sortie).strip() if trouves else None
 
-        # Supprimer les horodatages
-        if HORODATAGE_SRT.match(ligne):
-            horodatages_trouves += 1
-            continue
-
-        # Supprimer le numéro du sous-titre
-        # uniquement s'il précède un horodatage
-        if (
-            ligne.strip().isdigit()
-            and i + 1 < len(lignes)
-            and HORODATAGE_SRT.match(lignes[i + 1])
-        ):
-            continue
-
-        ligne = nettoyer_ligne(ligne)
-
-        if ligne:
-            resultat.append(ligne)
-        elif resultat and resultat[-1] != "":
-            # Conserver une séparation entre les sous-titres
-            resultat.append("")
-
-    # Vérifier que le fichier contient une structure SRT
-    if horodatages_trouves == 0:
-        return None
-
-    return "\n".join(resultat).strip()
-
-
-# --------------------------------------------------
-# 5. NETTOYAGE MICRODVD (.SUB)
-# --------------------------------------------------
 
 def nettoyer_microdvd(texte):
-    """Extrait le dialogue des fichiers MicroDVD."""
-
-    resultat = []
-    lignes_reconnues = 0
-
+    sortie, trouves = [], 0
     for ligne in texte.splitlines():
-
-        correspondance = MICRODVD.match(ligne)
-
-        if not correspondance:
-            continue
-
-        lignes_reconnues += 1
-        dialogue = correspondance.group(1)
-
-        # Dans MicroDVD, | sépare les lignes de dialogue
-        for morceau in dialogue.split("|"):
-            morceau = nettoyer_ligne(morceau)
-
-            if morceau:
-                resultat.append(morceau)
-
-    if lignes_reconnues == 0:
-        return None
-
-    return "\n".join(resultat).strip()
+        if m := MICRODVD.match(ligne):
+            trouves += 1
+            if m[1] == m[2] == "1":  # en-tête "{1}{1}23.976" (fps)
+                continue
+            dialogue = [l for l in map(nettoyer_ligne, m[3].split("|")) if l]
+            if dialogue:
+                sortie += dialogue + [""]
+    return "\n".join(sortie).strip() if trouves else None
 
 
-# --------------------------------------------------
-# 6. TRAITEMENT D'UN FICHIER
-# --------------------------------------------------
+NETTOYEURS = {".srt": nettoyer_srt, ".sub": nettoyer_microdvd}
 
-def nettoyer_fichier(chemin):
-    """Choisit le nettoyeur selon l'extension."""
-
-    extension = chemin.suffix.lower()
-    texte = lire_fichier(chemin)
-
-    if extension == ".srt":
-        contenu = nettoyer_srt(texte)
-
-    elif extension == ".sub":
-        contenu = nettoyer_microdvd(texte)
-
-    else:
-        return None
-
-    if contenu is None or not contenu.strip():
-        return None
-
-    return contenu
-
-
-# --------------------------------------------------
-# 7. TRAITEMENT DU DATASET
-# --------------------------------------------------
 
 def main():
+    base = Path(__file__).resolve().parent / "resultat"
+    p = argparse.ArgumentParser()
+    p.add_argument("--source", type=Path, default=base / "sous-titres")
+    p.add_argument("--destination", type=Path, default=base / "dossierNettoyerSousTitres")
+    args = p.parse_args()
 
-    if not SOURCE.is_dir():
-        raise FileNotFoundError(
-            f"Dossier source introuvable : {SOURCE}"
-        )
+    if not args.source.is_dir():
+        raise SystemExit(f"Dossier source introuvable : {args.source}")
+    args.destination.mkdir(parents=True, exist_ok=True)
 
-    DESTINATION.mkdir(parents=True, exist_ok=True)
-
-    nombre_traites = 0
-    nombre_ignores = 0
-    nombre_erreurs = 0
-
-    # Parcourir les fichiers dans le dossier source
     fichiers = sorted(
-        chemin
-        for chemin in SOURCE.rglob("*")
-        if chemin.is_file()
-        and chemin.suffix.lower() in {".srt", ".sub"}
+        f for f in args.source.rglob("*")
+        if f.is_file() and f.suffix.lower() in NETTOYEURS
     )
+    stats = Counter()
 
-    total = len(fichiers)
-
-    print(f"Fichiers à inspecter : {total}")
-    print("Début du nettoyage...\n")
-
-    for numero, fichier in enumerate(fichiers, start=1):
-
-        chemin_relatif = fichier.relative_to(SOURCE)
-
+    for n, f in enumerate(fichiers, 1):
+        rel = f.relative_to(args.source)
         try:
-            contenu = nettoyer_fichier(fichier)
-
-            if contenu is None:
-                nombre_ignores += 1
-
+            contenu = NETTOYEURS[f.suffix.lower()](lire(f))
+            if contenu:
+                sortie = args.destination / rel.with_name(rel.name + ".txt")
+                sortie.parent.mkdir(parents=True, exist_ok=True)
+                sortie.write_text(contenu, encoding="utf-8")
+                stats["traités"] += 1
             else:
-                # Ajouter .txt au nom d'origine
-                # Exemple : episode.srt devient episode.srt.txt
-                sortie_relative = Path(
-                    str(chemin_relatif) + ".txt"
-                )
+                stats["ignorés"] += 1
+        except Exception:
+            stats["erreurs"] += 1
 
-                sortie = DESTINATION / sortie_relative
+        if n % 500 == 0 or n == len(fichiers):
+            print(f"{n}/{len(fichiers)}", dict(stats))
 
-                sortie.parent.mkdir(
-                    parents=True,
-                    exist_ok=True
-                )
-
-                sortie.write_text(
-                    contenu,
-                    encoding="utf-8"
-                )
-
-                nombre_traites += 1
-
-        except Exception as erreur:
-            print(f"Erreur sur {chemin_relatif} : {erreur}")
-            nombre_erreurs += 1
-
-        # Afficher la progression toutes les 500 entrées
-        if numero % 500 == 0 or numero == total:
-            pourcentage = numero / total * 100
-
-            print(
-                f"Progression : {numero}/{total} "
-                f"({pourcentage:.1f} %) | "
-                f"Traités : {nombre_traites} | "
-                f"Ignorés : {nombre_ignores} | "
-                f"Erreurs : {nombre_erreurs}"
-            )
-
-    # --------------------------------------------------
-    # 8. BILAN FINAL
-    # --------------------------------------------------
-
-    print("\n========== BILAN DU NETTOYAGE ==========")
-    print(f"Fichiers inspectés : {total}")
-    print(f"Fichiers traités : {nombre_traites}")
-    print(f"Fichiers ignorés : {nombre_ignores}")
-    print(f"Fichiers en erreur : {nombre_erreurs}")
-    print(f"Dossier de sortie : {DESTINATION}")
+    print(f"\nTerminé : {dict(stats)} -> {args.destination}")
 
 
 if __name__ == "__main__":

@@ -1,315 +1,147 @@
-
-import sys
+import argparse
+import filecmp
 import shutil
+import tempfile
 import zipfile
+import zlib
+from contextlib import suppress
+from itertools import count
 from pathlib import Path
+
 import py7zr
 
-
-EXTENSIONS_AUTORISEES = {".srt", ".sub"}
-
-
-def fichier_valide(fichier):
-    """Vérifie si le fichier est un sous-titre non vide autorisé."""
-    return (
-        fichier.is_file()
-        and fichier.suffix.lower() in EXTENSIONS_AUTORISEES
-        and fichier.stat().st_size > 0
-    )
+EXTENSIONS = {".srt", ".sub"}
+UTILES = EXTENSIONS | {".zip"}  # sous-titres + ZIP imbriqués
+NIVEAUX_MAX = 10  # profondeur max de ZIP imbriqués (évite une boucle infinie)
+NOM_MAX = 100  # longueur max d'un nom de fichier extrait (limite Windows de 260 caractères)
+ERREURS_ZIP = (
+    zipfile.BadZipFile, zlib.error, EOFError, OSError,
+    RuntimeError, NotImplementedError,
+)
 
 
-def fichiers_identiques(fichier1, fichier2):
-    """Compare le contenu de deux fichiers sans les charger entièrement en mémoire."""
-    if fichier1.stat().st_size != fichier2.stat().st_size:
-        return False
-
-    with open(fichier1, "rb") as f1, open(fichier2, "rb") as f2:
-        while True:
-            bloc1 = f1.read(1024 * 1024)
-            bloc2 = f2.read(1024 * 1024)
-
-            if bloc1 != bloc2:
-                return False
-
-            if not bloc1:
-                return True
+def chemin_libre(chemin):
+    """Retourne chemin, ou chemin avec _1, _2... s'il existe déjà."""
+    if not chemin.exists():
+        return chemin
+    for i in count(1):
+        candidat = chemin.with_name(f"{chemin.stem}_{i}{chemin.suffix}")
+        if not candidat.exists():
+            return candidat
 
 
-def aplatir_dossier(serie):
-    """Conserve les sous-titres autorisés, supprime les fichiers inutiles,
-    déplace les fichiers à la racine et traite les collisions de noms.
-    """
-
-    for fichier in list(serie.rglob("*")):
-        if not fichier.is_file():
-            continue
-
-        # Supprimer les fichiers dont l'extension n'est pas autorisée
-        if fichier.suffix.lower() not in EXTENSIONS_AUTORISEES:
-            print("Fichier ignoré :", fichier.name)
-            fichier.unlink()
-            continue
-
-        # Supprimer les fichiers de sous-titres vides
-        if fichier.stat().st_size == 0:
-            print("Fichier vide supprimé :", fichier.name)
-            fichier.unlink()
-            continue
-
-        # Le fichier est déjà à la racine
-        if fichier.parent == serie:
-            continue
-
-        destination = serie / fichier.name
-
-        if destination.exists():
-            if fichiers_identiques(fichier, destination):
-                print("Doublon identique supprimé :", fichier.name)
-                fichier.unlink()
-            else:
-                # Préserver les deux fichiers en cas de collision
-                compteur = 1
-
-                while True:
-                    nouveau_nom = (
-                        f"{fichier.stem}_{compteur}{fichier.suffix}"
-                    )
-                    nouvelle_destination = serie / nouveau_nom
-
-                    if not nouvelle_destination.exists():
-                        break
-
-                    compteur += 1
-
-                shutil.move(str(fichier), str(nouvelle_destination))
-                print("Collision de nom :", nouveau_nom)
-        else:
-            shutil.move(str(fichier), str(destination))
-
-    # Supprimer les sous-dossiers devenus vides
-    for dossier in sorted(
-        serie.rglob("*"),
-        key=lambda p: len(p.parts),
-        reverse=True
-    ):
-        if dossier.is_dir():
-            try:
-                dossier.rmdir()
-            except OSError:
-                pass
+def nom_court(nom):
+    """Raccourcit un nom de fichier trop long en gardant son extension."""
+    if len(nom) <= NOM_MAX:
+        return nom
+    p = Path(nom)
+    return p.stem[: NOM_MAX - 10] + p.suffix
 
 
-def traiter_serie(serie):
-    """Extrait les ZIP, conserve uniquement les sous-titres autorisés
-    et nettoie les fichiers de la série.
-    """
+def extraire_zip(zip_path, serie):
+    """Extrait les sous-titres et ZIP internes d'un ZIP dans un dossier
+    temporaire court (à la racine de la série), puis supprime le ZIP."""
+    tmp = Path(tempfile.mkdtemp(dir=serie, prefix="t"))
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            for info in archive.infolist():
+                if info.is_dir():
+                    continue
+                nom = Path(info.filename.replace("\\", "/")).name
+                if Path(nom).suffix.lower() not in UTILES:
+                    continue
+                cible = chemin_libre(tmp / nom_court(nom))
+                with archive.open(info) as src, open(cible, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        zip_path.unlink()
+    except ERREURS_ZIP:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
 
-    zips_en_erreur = set()
 
-    while True:
-        # MODIFICATION : rechercher les ZIP récursivement,
-        # y compris dans les sous-dossiers.
-        zips = [
-            z for z in serie.rglob("*")
-            if z.is_file()
-            and z.suffix.lower() == ".zip"
-            and z not in zips_en_erreur
-        ]
-
+def extraire_zips(serie, dossier_erreurs):
+    """Décompresse tous les ZIP de la série (y compris imbriqués).
+    Les ZIP en échec sont déplacés dans dossier_erreurs."""
+    for _ in range(NIVEAUX_MAX):
+        zips = [z for z in serie.rglob("*.zip") if z.is_file()]
         if not zips:
-            break
-
+            return
         for zip_path in zips:
-            fichiers_crees = []
-
             try:
-                with zipfile.ZipFile(zip_path) as archive:
-                    for nom in archive.namelist():
+                extraire_zip(zip_path, serie)
+            except ERREURS_ZIP as e:
+                print("Erreur :", zip_path.name, "-", e)
+                dossier_erreurs.mkdir(exist_ok=True)
+                cible = chemin_libre(dossier_erreurs / f"{serie.name}__{zip_path.name}")
+                shutil.move(zip_path, cible)
+    print("Attention : ZIP encore imbriqués après", NIVEAUX_MAX, "niveaux :", serie.name)
 
-                        if nom.endswith(("/", "\\")):
-                            continue
 
-                        nom_fichier = Path(
-                            nom.replace("\\", "/")
-                        ).name
+def aplatir(serie):
+    """Met tous les sous-titres non vides à la racine, supprime le reste."""
+    for f in sorted(serie.rglob("*")):
+        if not f.is_file():
+            continue
+        if f.suffix.lower() not in EXTENSIONS or f.stat().st_size == 0:
+            f.unlink()
+        elif f.parent != serie:
+            dest = serie / f.name
+            if dest.exists() and filecmp.cmp(f, dest, shallow=False):
+                f.unlink()  # doublon identique
+            else:
+                shutil.move(f, chemin_libre(dest))
 
-                        if not nom_fichier:
-                            continue
-
-                        # MODIFICATION : conserver également les ZIP
-                        # imbriqués pour pouvoir les traiter au tour suivant.
-                        if Path(nom_fichier).suffix.lower() == ".zip":
-                            destination_zip = zip_path.parent / nom_fichier
-
-                            if destination_zip.exists():
-                                compteur_zip = 1
-                                while True:
-                                    nouveau_nom_zip = (
-                                        f"{Path(nom_fichier).stem}_"
-                                        f"{compteur_zip}.zip"
-                                    )
-                                    destination_zip = (
-                                        zip_path.parent / nouveau_nom_zip
-                                    )
-                                    if not destination_zip.exists():
-                                        break
-                                    compteur_zip += 1
-
-                            with archive.open(nom) as source:
-                                with open(destination_zip, "wb") as cible:
-                                    shutil.copyfileobj(source, cible)
-
-                            fichiers_crees.append(destination_zip)
-                            print("ZIP imbriqué trouvé :", destination_zip.name)
-                            continue
-
-                        # Ignorer les fichiers qui ne sont pas des sous-titres
-                        if Path(nom_fichier).suffix.lower() not in EXTENSIONS_AUTORISEES:
-                            continue
-
-                        destination = serie / nom_fichier
-
-                        # Ne pas extraire les fichiers vides
-                        info = archive.getinfo(nom)
-
-                        if info.file_size == 0:
-                            print("Sous-titre vide ignoré :", nom_fichier)
-                            continue
-
-                        # Si le nom existe déjà, comparer les contenus
-                        if destination.exists():
-                            identique = False
-
-                            if destination.is_file():
-                                with archive.open(nom) as source:
-                                    with open(destination, "rb") as existant:
-                                        identique = True
-
-                                        while True:
-                                            bloc1 = source.read(1024 * 1024)
-                                            bloc2 = existant.read(1024 * 1024)
-
-                                            if bloc1 != bloc2:
-                                                identique = False
-                                                break
-
-                                            if not bloc1:
-                                                break
-
-                            if identique:
-                                print(
-                                    "Doublon identique ignoré :",
-                                    nom_fichier
-                                )
-                                continue
-
-                            # Les contenus diffèrent : conserver les deux
-                            compteur = 1
-
-                            while True:
-                                nouveau_nom = (
-                                    f"{Path(nom_fichier).stem}_"
-                                    f"{compteur}"
-                                    f"{Path(nom_fichier).suffix}"
-                                )
-                                destination = serie / nouveau_nom
-
-                                if not destination.exists():
-                                    break
-
-                                compteur += 1
-
-                        with archive.open(nom) as source:
-                            with open(destination, "wb") as cible:
-                                shutil.copyfileobj(source, cible)
-
-                        fichiers_crees.append(destination)
-
-                # Extraction réussie : supprimer le ZIP original
-                zip_path.unlink()
-                print("ZIP extrait :", zip_path.name)
-
-            except (
-                zipfile.BadZipFile,
-                OSError,
-                RuntimeError,
-                NotImplementedError,
-                KeyError
-            ) as erreur:
-
-                print("Erreur :", zip_path.name, "-", erreur)
-
-                # Supprimer uniquement les fichiers créés pendant
-                # cette tentative d'extraction
-                for fichier in fichiers_crees:
-                    try:
-                        fichier.unlink(missing_ok=True)
-                    except OSError:
-                        pass
-
-                # Préserver le ZIP pour pouvoir l'inspecter
-                zips_en_erreur.add(zip_path)
-
-    # Nettoyer les fichiers restants et aplatir la série
-    aplatir_dossier(serie)
+    # supprimer les sous-dossiers devenus vides (les plus profonds d'abord)
+    for d in sorted(serie.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if d.is_dir():
+            with suppress(OSError):
+                d.rmdir()
 
 
 def main():
-    # 1. Récupérer le chemin de l'archive
-    archive = Path(__file__).resolve().parents[2] / "sous-titres.7z"
+    base = Path(__file__).resolve().parent
+    p = argparse.ArgumentParser()
+    p.add_argument("--archive", type=Path, default=base.parents[1] / "sous-titres.7z")
+    p.add_argument("--sortie", type=Path, default=base / "resultat")
+    args = p.parse_args()
 
-    if not archive.is_file():
-        print("Archive introuvable :", archive)
-        return
+    if not args.archive.is_file():
+        raise SystemExit(f"Archive introuvable : {args.archive}")
+    if args.sortie.exists() and any(args.sortie.iterdir()):
+        raise SystemExit(f"Le dossier de sortie n'est pas vide : {args.sortie}")
 
-    # 2. Créer le dossier de sortie
-    sortie = Path(__file__).resolve().parent / "resultat"
-
-    if sortie.exists() and any(sortie.iterdir()):
-        print("Le dossier de sortie n'est pas vide :", sortie)
-        return
-
-    sortie.mkdir(parents=True, exist_ok=True)
-
-    # 3. Extraire le fichier .7z
+    args.sortie.mkdir(parents=True, exist_ok=True)
     try:
-        with py7zr.SevenZipFile(archive, mode="r") as fichier:
-            fichier.extractall(path=sortie)
-    except Exception as erreur:
-        print("Erreur lors de l'extraction du 7z :", erreur)
-        return
+        with py7zr.SevenZipFile(args.archive, "r") as f:
+            f.extractall(path=args.sortie)
+    except Exception as e:
+        raise SystemExit(f"Erreur lors de l'extraction du 7z : {e}")
 
-    # 4. Trouver les dossiers des séries
-    contenu = list(sortie.iterdir())
+    contenu = list(args.sortie.iterdir())
+    racine = contenu[0] if len(contenu) == 1 and contenu[0].is_dir() else args.sortie
+    erreurs = args.sortie / "_zips_en_erreur"
 
-    if len(contenu) == 1 and contenu[0].is_dir():
-        racine = contenu[0]
-    else:
-        racine = sortie
-
-    series = [
-        dossier for dossier in racine.iterdir()
-        if dossier.is_dir()
-    ]
-
-    # 5. Traiter chaque série
+    series = [d for d in racine.iterdir() if d.is_dir()]
+    supprimees, plantees = [], []
     for serie in series:
-        print("\nSérie :", serie.name)
-        traiter_serie(serie)
+        print("Série :", serie.name)
+        try:
+            extraire_zips(serie, erreurs)
+            aplatir(serie)
+        except Exception as e:  # une série cassée ne doit pas bloquer les autres
+            print("Erreur inattendue sur", serie.name, "-", repr(e))
+            plantees.append(serie.name)
+            continue
+        if not any(serie.iterdir()):
+            serie.rmdir()
+            supprimees.append(serie.name)
 
-    print("\nTerminé ! Résultat :", racine)
-
-    # Bilan du nombre de séries
-    series_finales = [
-        dossier for dossier in racine.iterdir()
-        if dossier.is_dir()
-    ]
-
-    print("\n========== BILAN FINAL ==========")
-    print("Nombre de séries au début :", len(series))
-    print("Nombre de séries à la fin :", len(series_finales))
-    print("Nombre de séries manquantes :", len(series) - len(series_finales))
-    print("=================================")
+    print(f"\n{len(series)} séries au début, {len(series) - len(supprimees)} à la fin.")
+    print(f"Supprimées car sans sous-titres : {supprimees}")
+    if plantees:
+        print(f"Séries en erreur inattendue : {plantees}")
+    if erreurs.exists():
+        print(f"ZIP illisibles conservés dans : {erreurs}")
 
 
 if __name__ == "__main__":

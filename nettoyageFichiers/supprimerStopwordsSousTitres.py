@@ -1,166 +1,63 @@
-
+import argparse
 import re
+import unicodedata
+from collections import Counter
 from pathlib import Path
 
-
-# --------------------------------------------------
-# 1. CONFIGURATION
-# --------------------------------------------------
-
-DOSSIER_SCRIPT = Path(__file__).resolve().parent
-
-# Dossier contenant les dialogues déjà nettoyés
-SOURCE = (
-    DOSSIER_SCRIPT
-    / "resultat"
-    / "dossierNettoyerSousTitres"
-)
-
-# Fichier contenant les stop words français et anglais
-FICHIER_STOPWORDS = DOSSIER_SCRIPT / "stopwords_fr_en.txt"
-
-# Nouveau dossier contenant les textes sans stop words
-DESTINATION = (
-    DOSSIER_SCRIPT
-    / "resultat"
-    / "sousTitresSansStopWords"
-)
+MOT = re.compile(r"[^\W_]+(?:'[^\W_]+)*")  # mots et contractions (don't, l'homme)
+ELISION = re.compile(r"^(?:[cçdjlmnst]|qu|jusqu|lorsqu|puisqu|quoiqu)'(?=\w)")
 
 
-# --------------------------------------------------
-# 2. CHARGEMENT DES STOP WORDS
-# --------------------------------------------------
+def normaliser(texte):
+    return unicodedata.normalize("NFC", texte).lower().replace("’", "'")
+
 
 def charger_stopwords(chemin):
-    """Charge les stop words depuis un fichier texte."""
-
-    if not chemin.is_file():
-        raise FileNotFoundError(
-            f"Fichier de stop words introuvable : {chemin}"
-        )
-
-    stopwords = set()
-
-    with chemin.open("r", encoding="utf-8-sig") as fichier:
-        for ligne in fichier:
-            mot = ligne.strip().lower()
-
-            # Ignorer les lignes vides et les commentaires
-            if not mot or mot.startswith("#"):
-                continue
-
-            # Uniformiser les apostrophes
-            mot = mot.replace("’", "'")
-
-            stopwords.add(mot)
-
-    return stopwords
+    lignes = chemin.read_text(encoding="utf-8-sig").splitlines()
+    mots = {normaliser(ligne.strip()) for ligne in lignes}
+    return {m for m in mots if m and not m.startswith("#")}
 
 
-# --------------------------------------------------
-# 3. TOKENISATION
-# --------------------------------------------------
+def mots_utiles(texte, stopwords):
+    for mot in MOT.findall(normaliser(texte)):
+        if mot in stopwords:
+            continue
+        mot = ELISION.sub("", mot)  # l'homme -> homme, qu'est -> est
+        if len(mot) > 1 and mot not in stopwords:
+            yield mot
 
-# Reconnaît les mots accentués et les contractions
-# comme don't, l'homme et aujourd'hui.
-MOT = re.compile(
-    r"[^\W_]+(?:['’][^\W_]+)*",
-    re.UNICODE
-)
-
-
-# --------------------------------------------------
-# 4. SUPPRESSION DES STOP WORDS
-# --------------------------------------------------
-
-def supprimer_stopwords(texte, stopwords):
-    """Supprime les mots présents dans la liste de stop words."""
-
-    mots = MOT.findall(texte.lower())
-
-    mots_conserves = [
-        mot
-        for mot in mots
-        if mot.replace("’", "'") not in stopwords
-    ]
-
-    # Conserver uniquement les mots utiles à l'indexation
-    return " ".join(mots_conserves)
-
-
-# --------------------------------------------------
-# 5. TRAITEMENT D'UN FICHIER
-# --------------------------------------------------
-
-def traiter_fichier(fichier, stopwords):
-    """Lit un fichier, supprime les stop words et écrit le résultat."""
-
-    chemin_relatif = fichier.relative_to(SOURCE)
-    sortie = DESTINATION / chemin_relatif
-
-    texte = fichier.read_text(encoding="utf-8-sig")
-
-    texte_nettoye = supprimer_stopwords(texte, stopwords)
-
-    sortie.parent.mkdir(parents=True, exist_ok=True)
-
-    sortie.write_text(texte_nettoye, encoding="utf-8")
-
-
-# --------------------------------------------------
-# 6. TRAITEMENT DE TOUT LE DATASET
-# --------------------------------------------------
 
 def main():
+    base = Path(__file__).resolve().parent
+    p = argparse.ArgumentParser()
+    p.add_argument("--source", type=Path, default=base / "resultat" / "dossierNettoyerSousTitres")
+    p.add_argument("--destination", type=Path, default=base / "resultat" / "sousTitresSansStopWords")
+    p.add_argument("--stopwords", type=Path, default=base / "stopwords_fr_en.txt")
+    args = p.parse_args()
 
-    if not SOURCE.is_dir():
-        raise FileNotFoundError(
-            f"Dossier source introuvable : {SOURCE}"
-        )
+    if not args.source.is_dir():
+        raise SystemExit(f"Dossier source introuvable : {args.source}")
+    stopwords = charger_stopwords(args.stopwords)
+    fichiers = sorted(f for f in args.source.rglob("*.txt") if not f.name.startswith("_"))
+    print(f"{len(stopwords)} stop words, {len(fichiers)} fichiers")
 
-    stopwords = charger_stopwords(FICHIER_STOPWORDS)
-
-    DESTINATION.mkdir(parents=True, exist_ok=True)
-
-    fichiers = sorted(
-        fichier
-        for fichier in SOURCE.rglob("*.txt")
-        if fichier.is_file()
-    )
-
-    total = len(fichiers)
-    nombre_traites = 0
-    nombre_erreurs = 0
-
-    print(f"Stop words chargés : {len(stopwords)}")
-    print(f"Fichiers à traiter : {total}")
-    print("Début de la suppression des stop words...\n")
-
-    for numero, fichier in enumerate(fichiers, start=1):
-
+    stats = Counter()
+    for n, f in enumerate(fichiers, 1):
+        rel = f.relative_to(args.source)
         try:
-            traiter_fichier(fichier, stopwords)
-            nombre_traites += 1
+            texte = f.read_text(encoding="utf-8-sig")
+            sortie = args.destination / rel
+            sortie.parent.mkdir(parents=True, exist_ok=True)
+            sortie.write_text(" ".join(mots_utiles(texte, stopwords)), encoding="utf-8")
+            stats["traités"] += 1
+        except (OSError, UnicodeError) as e:
+            stats["erreurs"] += 1
+            print(f"Erreur sur {rel} : {e}")
 
-        except (OSError, UnicodeError) as erreur:
-            print(f"Erreur sur {fichier.name} : {erreur}")
-            nombre_erreurs += 1
+        if n % 500 == 0 or n == len(fichiers):
+            print(f"{n}/{len(fichiers)}", dict(stats))
 
-        if numero % 500 == 0 or numero == total:
-            pourcentage = numero / total * 100
-
-            print(
-                f"Progression : {numero}/{total} "
-                f"({pourcentage:.1f} %) | "
-                f"Traités : {nombre_traites} | "
-                f"Erreurs : {nombre_erreurs}"
-            )
-
-    print("\n========== BILAN FINAL ==========")
-    print(f"Fichiers trouvés : {total}")
-    print(f"Fichiers traités : {nombre_traites}")
-    print(f"Fichiers en erreur : {nombre_erreurs}")
-    print(f"Dossier de sortie : {DESTINATION}")
+    print(f"\nTerminé : {dict(stats)} -> {args.destination}")
 
 
 if __name__ == "__main__":
