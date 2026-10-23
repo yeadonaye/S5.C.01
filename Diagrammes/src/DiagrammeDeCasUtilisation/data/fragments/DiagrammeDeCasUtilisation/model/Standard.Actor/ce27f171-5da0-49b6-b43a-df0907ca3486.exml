@@ -1,0 +1,17 @@
+<?xml version="1.0" ?>
+<!--GENERATED FILE, PLEASE DO NOT EDIT!!!--><EXT object="Utilisateur connecté" version="4">
+  <OBJECT>
+    <ID name="Utilisateur connecté" mc="Standard.Actor" uid="ce27f171-5da0-49b6-b43a-df0907ca3486"/>
+    <PID name="diagrammedecasutilisation" mc="Standard.Package" uid="3329a686-21b7-4b71-b767-3833d6fd7695"/>
+    <ATTRIBUTES>
+      <ATT name="IsElementary">false</ATT>
+      <ATT name="IsAbstract">false</ATT>
+      <ATT name="IsLeaf">false</ATT>
+      <ATT name="IsRoot">false</ATT>
+      <ATT name="Visibility">Public</ATT>
+      <ATT name="Name"><![CDATA[Utilisateur connecté]]></ATT>
+      <ATT name="status">1970354901745664</ATT>
+    </ATTRIBUTES>
+    <DEPENDENCIES></DEPENDENCIES>
+  </OBJECT>
+</EXT>

@@ -1,5 +1,6 @@
 nettoyageFichiers/resultat/
 indexation/resultatIndexation/
+indexation/resultatIndexationNathan
 
 .vscode
 *.lo1
