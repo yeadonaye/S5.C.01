@@ -159,18 +159,3 @@ def similaires(S, titres, titre, n=5):
     return [(titres[j], round(float(S[i, j]), 3)) for j in top]
 
 
-if __name__ == "__main__":
-    conn = psycopg2.connect(DB_URL)
-    ids, titres, donnees = charger_donnees(conn)
-    conn.close()
-
-    exclus = construire_exclus()
-    S = construire_S(titres, donnees, exclus=exclus)
-
-    n = len(titres)
-    print(f"\n=== stoplist + prénoms | {len(exclus)} mots exclus | moyenne : {S.sum() / (n * (n - 1)):.3f}")
-
-    for serie in ["The vampire diaries"]:
-        print(f"  {serie} :")
-        for t, score in similaires(S, titres, serie):
-            print(f"    {t}  {score}")

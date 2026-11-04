@@ -442,35 +442,6 @@ def afficher_series(conn):
         print(f"{id_serie} - {titre}")
 
 
-# =========================================================
-# MENU DES NOTES
-# =========================================================
 
-def menu_notes(conn, id_utilisateur):
-    while True:
-        print("\n--- Gestion de mes notes ---")
-        print("1. Créer une note")
-        print("2. Lire toutes mes notes")
-        print("3. Lire ma note pour une série")
-        print("4. Modifier ma note pour une série")
-        print("5. Supprimer ma note pour une série")
-        print("0. Retour")
-
-        choix = lire_texte("Votre choix : ")
-
-        if choix == "1":
-            creer_note(conn, id_utilisateur)
-        elif choix == "2":
-            afficher_mes_notes(conn, id_utilisateur)
-        elif choix == "3":
-            afficher_ma_note(conn, id_utilisateur)
-        elif choix == "4":
-            modifier_note(conn, id_utilisateur)
-        elif choix == "5":
-            supprimer_note(conn, id_utilisateur)
-        elif choix == "0":
-            break
-        else:
-            print("Choix invalide.")
 
 
