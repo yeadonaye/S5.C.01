@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_URL = os.getenv(DB_URL)
+DB_URL = os.getenv("DB_URL")
 DOSSIER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "indexation/resultatIndexation")
 LONGUEUR_MAX = 100  # taille max d'un mot (VARCHAR(100))
 
