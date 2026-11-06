@@ -17,7 +17,7 @@ DB_CONFIG = {
 # Nettoyer la chaîne de caractaires qui est en entrée
 def extraire_mots(requete):
     """Découpe la requête en mots (minuscules, sans ponctuation)."""
-    mots = re.findall(r"[a-zà-ÿ]+", requete.lower())
+    mots = re.findall(r"[^\W_]+", requete.lower())
     return list(set(mots))  # doublons supprimés
 
 
