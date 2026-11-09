@@ -5,3 +5,5 @@ indexation/resultatIndexationNathan
 .vscode
 *.lo1
 LoopingImage.jpg
+.env
+__pycache__/

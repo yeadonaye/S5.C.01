@@ -1,29 +1,46 @@
-
+import os
 import re
 import numpy as np
 import psycopg2
 from scipy.sparse import csr_matrix, diags
+from dotenv import load_dotenv
 
-DB_URL = "postgresql://postgres.txthevshtuxweaeqmosa:sxeEsh0KLaiKhlK2@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
+load_dotenv()
 
-# Réglage retenu après les tests
-IDF_MIN = 0.7
-IDF_MAX = 2.5
-SUBLINEAIRE = True
-FILTRER_PRENOMS = True      # retire les prénoms (corpus NLTK)
+DB_URL = os.getenv("DB_URL")
 
-# --- Listes de mots à exclure --------------------------------------------
 
-# Déchets de sous-titres : tags de release, légendes sourds/malentendants
-STOP_TAGS = set("""
-uncut sdi lls pos ydy bbs raceman seriessub arcadya tagne akazab bizut
-italiansubs fbl mpm sixe iike iove ie cl ofthe fs56 tyno subtitle iook
-bleep indistinct chattering suspenseful instrumental paced comms nc dd
-lt sgt erm spoilers uk sie der bene que la fm hooray cant joes replie
-loky lci sl abs bolo wil tru sadgeezer méfies puta
-""".split())
+# REGLAGES RETENUS APRES LES TESTS
 
-# Noms de famille / personnages propres à une série (vus dans mots_suspects)
+IDF_MIN = 0.7            # on ignore les mots trop courants (IDF en dessous), ils n'aident pas à différencier les séries
+IDF_MAX = 2.5            # on ignore les mots trop précis (IDF au-dessus), ils n'apparaissent que dans une ou deux séries
+SUBLINEAIRE = True       # compresse le tfidf avec un log pour qu'un mot répété 50 fois ne pèse pas 50 fois plus qu'un mot dit une fois
+FILTRER_PRENOMS = True   # retire les prénoms anglais du corpus NLTK pour que deux séries ne se ressemblent pas juste à cause d'un prénom commun
+
+
+# NETTOYAGE DES MOTS : POURQUOI ICI ?
+# Oui, c'est bizarre de voir un peu de nettoyage ici, mais c'est voulu.
+# Les prénoms et noms de personnages sont très utiles pour un moteur de
+# recherche : walt, meth ou heisenberg permettent de retrouver Breaking Bad.
+# Ils sont donc gardés dans la base.
+# En revanche, pour la similarité et les recommandations, ils faussent le
+# résultat : si le personnage principal de deux séries s'appelle John, elles
+# seront recommandées l'une à l'autre uniquement parce que le même prénom
+# apparaît dans les deux.
+# C'est pour ça qu'on les retire ici, au moment de calculer la similarité,
+# et pas pendant le nettoyage général.
+#
+# Le filtre IDF fait le reste du travail :
+# - les mots trop courants (IDF trop petit) sont ceux qui sont passés
+#   à travers le nettoyage, ils n'aident pas à différencier les séries
+# - les mots trop précis (IDF trop grand) sont ceux qui n'apparaissent que
+#   dans une ou deux séries, comme les noms trop spécifiques
+# On ne garde que les mots entre IDF_MIN et IDF_MAX.
+
+
+# MOTS A EXCLURE
+
+# Noms de famille et personnages propres à une série (vus dans mots_suspects)
 STOP_PERSONNAGES = set("""
 bauer buchanan hodges palmer saunders raines heller dixon matthews langley
 weiss devlin hart clifton jenkins parkinson stevens swanson crowley jeffries
@@ -52,8 +69,11 @@ june august dawn eve angel jordan summer sue major king cook bob jack
 """.split())
 
 
-def charger_prenoms():
-    """Prénoms anglais du corpus NLTK (vide si NLTK indisponible)."""
+# LISTE DES PRENOMS
+
+# Récupère les prénoms anglais du corpus NLTK
+# Retourne un ensemble vide si NLTK est indisponible
+def charger_prenoms_nltk():
     try:
         import nltk
         try:
@@ -69,17 +89,20 @@ def charger_prenoms():
         return set()
 
 
-def construire_exclus(prenoms=FILTRER_PRENOMS):
-    exclus = set(STOP_TAGS) | set(STOP_PERSONNAGES)
+# Rassemble tous les mots à ignorer : personnages + prénoms (si activé)
+# Les mots de la liste GARDER ne sont jamais exclus
+def construire_mots_exclus(prenoms=FILTRER_PRENOMS):
+    exclus = set(STOP_PERSONNAGES)
     if prenoms:
-        exclus |= charger_prenoms()
+        exclus |= charger_prenoms_nltk()
     return exclus - GARDER
 
 
-# --- Chargement et matrice -----------------------------------------------
+# CHARGEMENT DES DONNEES
 
-def charger_donnees(conn):
-    """Une seule lecture de la base. Retourne (ids, titres, donnees)."""
+# Lit la base une seule fois
+# Retourne (ids, titres, donnees) avec donnees = (lignes, mots, tfidf, idf)
+def charger_donnees_series(conn):
     cur = conn.cursor()
     cur.execute("SELECT idSerie, titre FROM Serie ORDER BY idSerie")
     series = cur.fetchall()
@@ -101,10 +124,14 @@ def charger_donnees(conn):
     return ids, titres, (lignes, mots, tfidf, idf)
 
 
-def construire_S(titres, donnees, idf_min=IDF_MIN, idf_max=IDF_MAX,
-                 sublineaire=SUBLINEAIRE, exclus=frozenset()):
-    """Matrice de similarité n×n en mémoire.
-    exclus : mots à ignorer (en plus des mots contenant un chiffre)."""
+# MATRICE DE SIMILARITE
+
+# Construit la matrice n x n qui donne la similarité entre chaque paire de séries
+# Garde seulement les mots dont l'IDF est entre idf_min et idf_max,
+# ignore les mots exclus et ceux qui contiennent un chiffre
+def construire_matrice_similarite(titres, donnees, idf_min=IDF_MIN,
+                                  idf_max=IDF_MAX, sublineaire=SUBLINEAIRE,
+                                  exclus=frozenset()):
     lignes, mots, tfidf, idf = donnees
 
     vocab, inv = np.unique(mots, return_inverse=True)
@@ -130,32 +157,39 @@ def construire_S(titres, donnees, idf_min=IDF_MIN, idf_max=IDF_MAX,
     return S
 
 
-def charger_similarites():
-    """Raccourci : lit la base une fois et retourne (S, ids, titres)."""
+# Raccourci : ouvre la connexion, lit la base une fois et calcule la matrice
+# Retourne (S, ids, titres)
+def charger_matrice_similarite():
     conn = psycopg2.connect(DB_URL)
     try:
-        ids, titres, donnees = charger_donnees(conn)
+        ids, titres, donnees = charger_donnees_series(conn)
     finally:
         conn.close()
-    S = construire_S(titres, donnees, exclus=construire_exclus())
+    S = construire_matrice_similarite(
+        titres, donnees, exclus=construire_mots_exclus()
+    )
     return S, ids, titres
 
 
-def _norm(s):
+# RECHERCHE DE SERIES SIMILAIRES
+
+# Met un titre en minuscules et sans espaces pour pouvoir le comparer
+def normaliser_titre(s):
     return "".join(s.lower().split())
 
 
-def trouver_index(titres, titre):
-    cible = _norm(titre)
+# Retourne la position d'une série dans la liste des titres
+# Lève une erreur si le titre n'existe pas
+def trouver_index_serie(titres, titre):
+    cible = normaliser_titre(titre)
     for i, t in enumerate(titres):
-        if _norm(t) == cible:
+        if normaliser_titre(t) == cible:
             return i
     raise ValueError(f"Titre introuvable : {titre!r}\nTitres disponibles : {titres}")
 
 
-def similaires(S, titres, titre, n=5):
-    i = trouver_index(titres, titre)
+# Retourne les n séries les plus proches d'un titre, avec leur score
+def trouver_series_similaires(S, titres, titre, n=5):
+    i = trouver_index_serie(titres, titre)
     top = np.argsort(S[i])[::-1][:n]
     return [(titres[j], round(float(S[i, j]), 3)) for j in top]
-
-

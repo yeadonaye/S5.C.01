@@ -2,21 +2,21 @@ import os
 import hmac
 import hashlib
 import secrets
-import getpass
 
 import psycopg2
 from psycopg2 import errors
+from dotenv import load_dotenv
 
 
-# =========================================================
 # CONNEXION A LA BASE DE DONNEES
-# =========================================================
 
-DB_URL = os.environ.get("DATABASE_URL")
+load_dotenv()
+
+DB_URL = os.getenv("DB_URL")
 
 if not DB_URL:
     raise RuntimeError(
-        "La variable d'environnement DATABASE_URL est manquante."
+        "La variable DB_URL est manquante dans le fichier .env."
     )
 
 
@@ -24,9 +24,7 @@ def connecter():
     return psycopg2.connect(DB_URL)
 
 
-# =========================================================
 # GESTION DES MOTS DE PASSE
-# =========================================================
 
 def hasher_mot_de_passe(mot_de_passe):
     sel = secrets.token_bytes(16)
@@ -62,51 +60,32 @@ def verifier_mot_de_passe(mot_de_passe, hash_stocke):
         return False
 
 
-# =========================================================
 # OUTILS COMMUNS
-# =========================================================
+# Chaque fonction retourne un dictionnaire avec "succes" et "message"
 
-def lire_texte(message):
-    return input(message).strip()
-
-
-def lire_mot_de_passe(message):
-    return getpass.getpass(message)
-
-
-def lire_entier(message):
-    try:
-        return int(lire_texte(message))
-    except ValueError:
-        print("Veuillez saisir un nombre valide.")
-        return None
-
-
-def afficher_message_erreur(e):
+def message_erreur(e):
     if isinstance(e, errors.UniqueViolation):
-        print("Cette valeur existe déjà dans la base.")
-    elif isinstance(e, errors.ForeignKeyViolation):
-        print("Cette opération est impossible : référence invalide.")
-    else:
-        print("Une erreur est survenue :", e)
+        return "Cette valeur existe déjà dans la base."
+    if isinstance(e, errors.ForeignKeyViolation):
+        return "Cette opération est impossible : référence invalide."
+    return f"Une erreur est survenue : {e}"
 
 
-# =========================================================
+def reponse(succes, message, **extra):
+    return {"succes": succes, "message": message, **extra}
+
+
 # CRUD UTILISATEUR
-# CREATE -> READ -> UPDATE -> DELETE
-# =========================================================
 
-# CREATE — créer un compte
+# CREATE : créer un compte
 
-def creer_compte(conn):
-    nom = lire_texte("Nom : ")
-    prenom = lire_texte("Prénom : ")
-    email = lire_texte("Email : ").lower()
-    mot_de_passe = lire_mot_de_passe("Mot de passe : ")
+def creer_compte(conn, nom, prenom, email, mot_de_passe):
+    nom = nom.strip()
+    prenom = prenom.strip()
+    email = email.strip().lower()
 
     if not nom or not prenom or not email or not mot_de_passe:
-        print("Tous les champs sont obligatoires.")
-        return
+        return reponse(False, "Tous les champs sont obligatoires.")
 
     hash_mdp = hasher_mot_de_passe(mot_de_passe)
 
@@ -122,13 +101,15 @@ def creer_compte(conn):
 
                 id_utilisateur = cur.fetchone()[0]
 
-        print(f"Compte créé avec succès. ID : {id_utilisateur}")
+        return reponse(True, "Compte créé avec succès.",
+                       idUtilisateur=id_utilisateur)
 
     except psycopg2.Error as e:
-        afficher_message_erreur(e)
+        return reponse(False, message_erreur(e))
 
 
-# READ — afficher mon compte
+# READ : afficher un compte
+# Retourne un dictionnaire, ou None si le compte n'existe pas
 
 def afficher_compte(conn, id_utilisateur):
     with conn.cursor() as cur:
@@ -141,81 +122,71 @@ def afficher_compte(conn, id_utilisateur):
         utilisateur = cur.fetchone()
 
     if utilisateur is None:
-        print("Compte introuvable.")
-        return
+        return None
 
     nom, prenom, email, date_inscription = utilisateur
 
-    print("\n--- Mon compte ---")
-    print("Nom :", nom)
-    print("Prénom :", prenom)
-    print("Email :", email)
-    print("Inscription :", date_inscription)
+    return {
+        "nom": nom,
+        "prenom": prenom,
+        "email": email,
+        "dateInscription": date_inscription,
+    }
 
 
-# UPDATE — modifier mon compte
+# UPDATE : modifier un compte
+# Un paramètre à None (ou vide) est conservé tel quel
 
-def modifier_compte(conn, id_utilisateur):
-    print("\n--- Modifier mon compte ---")
-    print("Laissez un champ vide pour le conserver.")
+def modifier_compte(conn, id_utilisateur, nom=None, prenom=None,
+                    email=None, nouveau_mdp=None):
+    champs = []
+    valeurs = []
 
-    nom = lire_texte("Nouveau nom : ")
-    prenom = lire_texte("Nouveau prénom : ")
-    email = lire_texte("Nouvel email : ").lower()
-    nouveau_mdp = lire_mot_de_passe(
-        "Nouveau mot de passe (vide pour conserver) : "
-    )
+    if nom and nom.strip():
+        champs.append("nom = %s")
+        valeurs.append(nom.strip())
+
+    if prenom and prenom.strip():
+        champs.append("prenom = %s")
+        valeurs.append(prenom.strip())
+
+    if email and email.strip():
+        champs.append("email = %s")
+        valeurs.append(email.strip().lower())
+
+    if nouveau_mdp:
+        champs.append("motDePasseHash = %s")
+        valeurs.append(hasher_mot_de_passe(nouveau_mdp))
+
+    if not champs:
+        return reponse(False, "Aucune modification demandée.")
+
+    valeurs.append(id_utilisateur)
 
     try:
         with conn:
             with conn.cursor() as cur:
-                if nom:
-                    cur.execute("""
-                        UPDATE Utilisateur
-                        SET nom = %s
-                        WHERE idUtilisateur = %s
-                    """, (nom, id_utilisateur))
+                cur.execute(
+                    f"UPDATE Utilisateur SET {', '.join(champs)} "
+                    "WHERE idUtilisateur = %s",
+                    valeurs
+                )
 
-                if prenom:
-                    cur.execute("""
-                        UPDATE Utilisateur
-                        SET prenom = %s
-                        WHERE idUtilisateur = %s
-                    """, (prenom, id_utilisateur))
+                modifie = cur.rowcount
 
-                if email:
-                    cur.execute("""
-                        UPDATE Utilisateur
-                        SET email = %s
-                        WHERE idUtilisateur = %s
-                    """, (email, id_utilisateur))
+        if modifie == 0:
+            return reponse(False, "Compte introuvable.")
 
-                if nouveau_mdp:
-                    hash_mdp = hasher_mot_de_passe(nouveau_mdp)
-
-                    cur.execute("""
-                        UPDATE Utilisateur
-                        SET motDePasseHash = %s
-                        WHERE idUtilisateur = %s
-                    """, (hash_mdp, id_utilisateur))
-
-        print("Compte modifié avec succès.")
+        return reponse(True, "Compte modifié avec succès.")
 
     except psycopg2.Error as e:
-        afficher_message_erreur(e)
+        return reponse(False, message_erreur(e))
 
 
-# DELETE — supprimer mon compte
+# DELETE : supprimer un compte
+# La confirmation se fait côté front
 
 def supprimer_compte(conn, id_utilisateur):
-    confirmation = lire_texte(
-        "Supprimer définitivement votre compte ? (oui/non) : "
-    ).lower()
-
-    if confirmation != "oui":
-        print("Suppression annulée.")
-        return False
-
     try:
         with conn:
             with conn.cursor() as cur:
@@ -224,21 +195,22 @@ def supprimer_compte(conn, id_utilisateur):
                     WHERE idUtilisateur = %s
                 """, (id_utilisateur,))
 
-        print("Compte supprimé.")
-        return True
+                supprime = cur.rowcount
+
+        if supprime == 0:
+            return reponse(False, "Compte introuvable.")
+
+        return reponse(True, "Compte supprimé.")
 
     except psycopg2.Error as e:
-        afficher_message_erreur(e)
-        return False
+        return reponse(False, message_erreur(e))
 
 
-# =========================================================
 # CONNEXION UTILISATEUR
-# =========================================================
+# Retourne les infos de l'utilisateur, ou None si identifiants incorrects
 
-def connecter_utilisateur(conn):
-    email = lire_texte("Email : ").lower()
-    mot_de_passe = lire_mot_de_passe("Mot de passe : ")
+def connecter_utilisateur(conn, email, mot_de_passe):
+    email = email.strip().lower()
 
     with conn.cursor() as cur:
         cur.execute("""
@@ -250,41 +222,27 @@ def connecter_utilisateur(conn):
         utilisateur = cur.fetchone()
 
     if utilisateur is None:
-        print("Email ou mot de passe incorrect.")
         return None
 
     id_utilisateur, nom, prenom, hash_stocke = utilisateur
 
     if not verifier_mot_de_passe(mot_de_passe, hash_stocke):
-        print("Email ou mot de passe incorrect.")
         return None
 
-    print(f"\nBienvenue {prenom} {nom} !")
-    return id_utilisateur
+    return {
+        "idUtilisateur": id_utilisateur,
+        "nom": nom,
+        "prenom": prenom,
+    }
 
 
-# =========================================================
 # CRUD NOTES
-# CREATE -> READ -> UPDATE -> DELETE
-# =========================================================
 
-# CREATE — créer une note
-# La liste des séries permet de choisir l'ID à noter.
+# CREATE : créer une note
 
-def creer_note(conn, id_utilisateur):
-    afficher_series(conn)
-
-    id_serie = lire_entier("\nID de la série à noter : ")
-    if id_serie is None:
-        return
-
-    note = lire_entier("Note sur 5 : ")
-    if note is None:
-        return
-
+def creer_note(conn, id_utilisateur, id_serie, note):
     if not 1 <= note <= 5:
-        print("La note doit être comprise entre 1 et 5.")
-        return
+        return reponse(False, "La note doit être comprise entre 1 et 5.")
 
     try:
         with conn:
@@ -294,13 +252,13 @@ def creer_note(conn, id_utilisateur):
                     VALUES (%s, %s, %s)
                 """, (id_utilisateur, id_serie, note))
 
-        print("Note créée avec succès.")
+        return reponse(True, "Note créée avec succès.")
 
     except psycopg2.Error as e:
-        afficher_message_erreur(e)
+        return reponse(False, message_erreur(e))
 
 
-# READ — afficher toutes mes notes
+# READ : toutes les notes d'un utilisateur
 
 def afficher_mes_notes(conn, id_utilisateur):
     with conn.cursor() as cur:
@@ -314,23 +272,17 @@ def afficher_mes_notes(conn, id_utilisateur):
 
         notes = cur.fetchall()
 
-    print("\n--- Toutes mes notes ---")
-
-    if not notes:
-        print("Vous n'avez encore noté aucune série.")
-        return
-
-    for id_serie, titre, note, date in notes:
-        print(f"ID {id_serie} - {titre} : {note}/5 (le {date})")
+    return [
+        {"idSerie": id_serie, "titre": titre,
+         "note": note, "dateEvaluation": date}
+        for id_serie, titre, note, date in notes
+    ]
 
 
-# READ — afficher ma note pour une série précise
+# READ : la note d'un utilisateur pour une série précise
+# Retourne None si la série n'a pas été notée
 
-def afficher_ma_note(conn, id_utilisateur):
-    id_serie = lire_entier("ID de la série : ")
-    if id_serie is None:
-        return
-
+def afficher_ma_note(conn, id_utilisateur, id_serie):
     with conn.cursor() as cur:
         cur.execute("""
             SELECT s.titre, e.note, e.dateEvaluation
@@ -340,32 +292,26 @@ def afficher_ma_note(conn, id_utilisateur):
               AND e.idSerie = %s
         """, (id_utilisateur, id_serie))
 
-        note = cur.fetchone()
+        resultat = cur.fetchone()
 
-    if note is None:
-        print("Vous n'avez pas encore noté cette série.")
-        return
+    if resultat is None:
+        return None
 
-    titre, valeur, date = note
-    print(f"{titre} : {valeur}/5 (le {date})")
+    titre, note, date = resultat
+
+    return {
+        "idSerie": id_serie,
+        "titre": titre,
+        "note": note,
+        "dateEvaluation": date,
+    }
 
 
-# UPDATE — modifier ma note pour une série précise
+# UPDATE : modifier la note d'une série
 
-def modifier_note(conn, id_utilisateur):
-    id_serie = lire_entier(
-        "ID de la série dont vous voulez modifier la note : "
-    )
-    if id_serie is None:
-        return
-
-    nouvelle_note = lire_entier("Nouvelle note sur 5 : ")
-    if nouvelle_note is None:
-        return
-
+def modifier_note(conn, id_utilisateur, id_serie, nouvelle_note):
     if not 1 <= nouvelle_note <= 5:
-        print("La note doit être comprise entre 1 et 5.")
-        return
+        return reponse(False, "La note doit être comprise entre 1 et 5.")
 
     try:
         with conn:
@@ -381,23 +327,17 @@ def modifier_note(conn, id_utilisateur):
                 note_modifiee = cur.rowcount
 
         if note_modifiee == 0:
-            print("Aucune note trouvée pour cette série.")
-        else:
-            print("Note modifiée avec succès.")
+            return reponse(False, "Aucune note trouvée pour cette série.")
+
+        return reponse(True, "Note modifiée avec succès.")
 
     except psycopg2.Error as e:
-        afficher_message_erreur(e)
+        return reponse(False, message_erreur(e))
 
 
-# DELETE — supprimer ma note pour une série précise
+# DELETE : supprimer la note d'une série
 
-def supprimer_note(conn, id_utilisateur):
-    id_serie = lire_entier(
-        "ID de la série dont vous voulez supprimer la note : "
-    )
-    if id_serie is None:
-        return
-
+def supprimer_note(conn, id_utilisateur, id_serie):
     try:
         with conn:
             with conn.cursor() as cur:
@@ -410,18 +350,16 @@ def supprimer_note(conn, id_utilisateur):
                 note_supprimee = cur.rowcount
 
         if note_supprimee == 0:
-            print("Aucune note trouvée pour cette série.")
-        else:
-            print("Note supprimée.")
+            return reponse(False, "Aucune note trouvée pour cette série.")
+
+        return reponse(True, "Note supprimée.")
 
     except psycopg2.Error as e:
-        afficher_message_erreur(e)
+        return reponse(False, message_erreur(e))
 
 
-# =========================================================
-# AFFICHER LES SERIES
-# Utilisé lors de la création d'une note
-# =========================================================
+# LISTE DES SERIES
+# Utilisé pour choisir la série à noter
 
 def afficher_series(conn):
     with conn.cursor() as cur:
@@ -432,16 +370,5 @@ def afficher_series(conn):
         """)
         series = cur.fetchall()
 
-    print("\n--- Toutes les séries ---")
-
-    if not series:
-        print("Aucune série trouvée.")
-        return
-
-    for id_serie, titre in series:
-        print(f"{id_serie} - {titre}")
-
-
-
-
-
+    return [{"idSerie": id_serie, "titre": titre}
+            for id_serie, titre in series]
