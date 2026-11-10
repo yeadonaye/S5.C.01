@@ -22,7 +22,7 @@ def extraire_mots(requete):
 
 
 # Fonction principale pour la recherche
-def rechercher(requete, limite=5):
+def rechercher(requete, limite=10):
     """Retourne les séries les plus pertinentes pour les mots-clés donnés."""
     mots = extraire_mots(requete)
     if not mots:
@@ -47,13 +47,3 @@ def rechercher(requete, limite=5):
         with conn.cursor() as cur:
             cur.execute(sql, (mots, limite))
             return cur.fetchall()
-
-
-if __name__ == "__main__":
-    requete = input("Mots-clés : ")
-    resultats = rechercher(requete)
-
-    if not resultats:
-        print("Aucune série trouvée.")
-    for rang, (id_serie, titre, nb, score) in enumerate(resultats, start=1):
-        print(f"{rang}. {titre}  (mots trouvés : {nb}, score : {float(score):.4f})")
