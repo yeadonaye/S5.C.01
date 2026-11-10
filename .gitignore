@@ -3,6 +3,7 @@ indexation/resultatIndexation/
 indexation/resultatIndexationNathan
 
 .vscode
+.env
 *.lo1
 LoopingImage.jpg
 .env
