@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+psycopg2-binary
+python-dotenv
+numpy
+scipy
+nltk
+pyjwt
+email-validator
