@@ -1,10 +1,10 @@
 nettoyageFichiers/resultat/
 indexation/resultatIndexation/
 indexation/resultatIndexationNathan
+data/
 
 .vscode
 .env
 *.lo1
 LoopingImage.jpg
-.env
 __pycache__/
