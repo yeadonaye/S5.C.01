@@ -1,0 +1,1 @@
+<p>Connecté en tant que {user.prenom} {user.nom}</p>
