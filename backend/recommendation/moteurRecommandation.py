@@ -1,40 +1,10 @@
-import numpy as np
+import psycopg2
+from psycopg2 import errors
 
 import gestionUtilisateur as gu
-import similarite as sim
 
 
 NB_RECOMMANDATIONS = 5
-
-# Contient la matrice de similarité et ses données une fois calculées
-# Reste à None tant que le moteur n'a pas été chargé
-_cache_matrice_similarite = None
-
-
-# MOTEUR DE SIMILARITE
-
-# Charge la matrice de similarité une seule fois et la garde en mémoire
-# Les appels suivants réutilisent directement le résultat déjà calculé
-def charger_moteur_similarite(conn):
-    global _cache_matrice_similarite
-
-    if _cache_matrice_similarite is None:
-        ids, titres, donnees = sim.charger_donnees_series(conn)
-        exclus = sim.construire_mots_exclus()
-        matrice = sim.construire_matrice_similarite(
-            titres, donnees, exclus=exclus
-        )
-
-        _cache_matrice_similarite = {
-            "ids": ids,
-            "titres": titres,
-            "matrice": matrice,
-            "index_par_id": {
-                id_serie: index for index, id_serie in enumerate(ids)
-            },
-        }
-
-    return _cache_matrice_similarite
 
 
 # SERIES LES MIEUX NOTEES
@@ -70,6 +40,8 @@ def recuperer_series_mieux_notees(conn, limite=NB_RECOMMANDATIONS):
 # Les séries proches de celles qu'il a aimées gagnent des points,
 # les séries proches de celles qu'il n'a pas aimées en perdent
 # Les séries déjà notées ne sont jamais recommandées
+# Les similarités ne sont plus calculées ici : elles sont lues dans la table
+# Similarite (remplie par le script calculerSimilarite.py)
 def recommander_pour_utilisateur(conn, id_utilisateur,
                                  limite=NB_RECOMMANDATIONS):
     with conn.cursor() as cur:
@@ -88,21 +60,9 @@ def recommander_pour_utilisateur(conn, id_utilisateur,
             recommandations=[]
         )
 
-    moteur = charger_moteur_similarite(conn)
-    ids = moteur["ids"]
-    titres = moteur["titres"]
-    matrice = moteur["matrice"]
-    index_par_id = moteur["index_par_id"]
+    poids_total = sum(abs(note - 3) for _, note in notes)
 
-    ids_deja_notes = {id_serie for id_serie, _ in notes}
-
-    notes_ponderees = [
-        (id_serie, note - 3)
-        for id_serie, note in notes
-        if note != 3 and id_serie in index_par_id
-    ]
-
-    if not notes_ponderees:
+    if poids_total == 0:
         return gu.reponse(
             False,
             "Notez des séries avec des notes différentes de 3/5 "
@@ -110,29 +70,58 @@ def recommander_pour_utilisateur(conn, id_utilisateur,
             recommandations=[]
         )
 
-    scores = np.zeros(len(titres), dtype=float)
-    poids_total = sum(abs(poids) for _, poids in notes_ponderees)
+    # Score d'une série candidate = somme(similarité avec une série notée * poids)
+    # divisée par la somme des poids en valeur absolue
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT s.idSerie, s.titre,
+                       SUM(sim.valeur * (e.note - 3)) / %s AS score
+                FROM Evaluer e
+                JOIN Similarite sim ON sim.idSerie1 = e.idSerie
+                JOIN Serie s ON s.idSerie = sim.idSerie2
+                WHERE e.idUtilisateur = %s
+                  AND e.note <> 3
+                  AND s.idSerie NOT IN (
+                      SELECT idSerie FROM Evaluer WHERE idUtilisateur = %s
+                  )
+                GROUP BY s.idSerie, s.titre
+                ORDER BY score DESC, s.idSerie
+                LIMIT %s
+            """, (poids_total, id_utilisateur, id_utilisateur, limite))
 
-    for id_serie, poids in notes_ponderees:
-        scores += matrice[index_par_id[id_serie]] * poids
+            resultats = cur.fetchall()
 
-    scores /= poids_total
+    except errors.UndefinedTable:
+        conn.rollback()
+        return gu.reponse(
+            False,
+            "La table Similarite n'existe pas encore. "
+            "Lancez le script calculerSimilarite.py.",
+            recommandations=[]
+        )
 
-    candidats = [
-        index for index, id_serie in enumerate(ids)
-        if id_serie not in ids_deja_notes
-    ]
-    candidats.sort(key=lambda index: scores[index], reverse=True)
+    if not resultats:
+        with conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM Similarite)")
+            table_remplie = cur.fetchone()[0]
 
-    recommandations = [
-        {"idSerie": ids[index], "titre": titres[index],
-         "score": round(float(scores[index]), 3)}
-        for index in candidats[:limite]
-    ]
+        if not table_remplie:
+            return gu.reponse(
+                False,
+                "Les similarités n'ont pas encore été calculées. "
+                "Lancez le script calculerSimilarite.py.",
+                recommandations=[]
+            )
 
-    if not recommandations:
         return gu.reponse(False, "Aucune série à recommander.",
                           recommandations=[])
+
+    recommandations = [
+        {"idSerie": id_serie, "titre": titre,
+         "score": round(float(score), 3)}
+        for id_serie, titre, score in resultats
+    ]
 
     return gu.reponse(True, "Recommandations calculées.",
                       recommandations=recommandations)
